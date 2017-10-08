@@ -1,0 +1,25 @@
+DOVECOT_INSTALLED=yes
+DOVECOT_CFLAGS="-std=gnu99 -march=x86-64 -mtune=generic -O2 -pipe -fstack-protector-strong -fno-plt -Wall -W -Wmissing-prototypes -Wmissing-declarations -Wpointer-arith -Wchar-subscripts -Wformat=2 -Wbad-function-cast -fno-builtin-strftime -Wstrict-aliasing=2  "
+DOVECOT_LIBS=""
+DOVECOT_SSL_LIBS="-lssl -lcrypto"
+DOVECOT_SQL_LIBS="-L/usr/lib  -lmysqlclient -lpthread -lz -lm -ldl -lssl -lcrypto  -L/usr/lib -lpq  -lsqlite3 "
+DOVECOT_COMPRESS_LIBS=" -lz -lbz2 -llzma -llz4"
+
+LIBDOVECOT='-L/usr/lib/dovecot -ldovecot'
+LIBDOVECOT_LOGIN='-ldovecot-login -lssl -lcrypto'
+LIBDOVECOT_SQL=-ldovecot-sql
+LIBDOVECOT_COMPRESS=-ldovecot-compression
+LIBDOVECOT_LDA=-ldovecot-lda
+LIBDOVECOT_STORAGE='-ldovecot-storage '
+LIBDOVECOT_DSYNC=-ldovecot-dsync
+LIBDOVECOT_LIBFTS=-ldovecot-fts
+
+
+LIBDOVECOT_INCLUDE=-I/usr/include/dovecot
+
+dovecot_pkgincludedir=/usr/include/dovecot
+dovecot_pkglibdir=/usr/lib/dovecot
+dovecot_pkglibexecdir=/usr/lib/dovecot
+dovecot_docdir=/usr/share/doc/dovecot
+dovecot_moduledir=/usr/lib/dovecot/modules
+dovecot_statedir=/var/lib/dovecot

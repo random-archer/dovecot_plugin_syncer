@@ -1,0 +1,3 @@
+
+TESTS = \
+    dovecot.sh
