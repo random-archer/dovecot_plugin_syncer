@@ -30,18 +30,21 @@ static MODULE_CONTEXT_DEFINE_INIT(syncer_mail_user_module, &mail_user_module_reg
 ;
 
 struct syncer_mbox_info {
-
+	const char *change;
+	const char *mbox_name;
 };
 
 struct syncer_mail_user {
 	union mail_user_module_context module_ctx;
+	pool_t pool;
 	const char *mail_home;
 	const char *user_name;
 	const char *user_home;
 	const char *syncer_path;
 	const char *syncer_script;
-	HASH_TABLE(const char *, void *)
-	guids; // mail box
+	bool syncer_debug;
+	HASH_TABLE(const char *, struct syncer_mbox_info *)
+	mbox_map; // guid => info
 };
 
 static void syncer_ensure_folder(const char * path) {
@@ -58,24 +61,41 @@ static void syncer_report_change(struct syncer_mail_user *plug_user) {
 	const char *syncer_path;
 	const char *record_path;
 
-	const char *key;
-	void * value;
+	const char *mbox_guid;
+	struct syncer_mbox_info * mbox_info;
+
 	struct hash_iterate_context *iter;
-	iter = hash_table_iterate_init(plug_user->guids);
+	iter = hash_table_iterate_init(plug_user->mbox_map);
 
 	syncer_path = i_strconcat(plug_user->mail_home, "/", plug_user->syncer_path,
 	NULL);
 	syncer_ensure_folder(syncer_path);
 
-	while (hash_table_iterate(iter, plug_user->guids, &key, &value)) {
+	while (hash_table_iterate(iter, plug_user->mbox_map, &mbox_guid, &mbox_info)) {
 
-		i_info("%s : guid=%s", __func__, key);
+		if (plug_user->syncer_debug) {
+			i_info("%s : change=%s mbox_guid=%s mbox_name=%s", __func__, //
+					mbox_info->change, mbox_guid, mbox_info->mbox_name);
+		}
 
-		record_path = i_strconcat(syncer_path, "/", key, NULL);
+		record_path = i_strconcat(syncer_path, "/", mbox_guid, NULL);
 
 		fd = open(record_path, O_RDWR | O_CREAT | O_TRUNC, 0600);
-		output = o_stream_create_fd(fd, 0, FALSE);
-		o_stream_destroy(&output);
+
+		if (plug_user->syncer_debug) {
+			const char *record_entry;
+			record_entry = i_strconcat( //
+					"change=", mbox_info->change, " ", //
+					"mbox_guid=", mbox_guid, " ", //
+					"mbox_name='", mbox_info->mbox_name, "' ", //
+					NULL);
+			output = o_stream_create_fd(fd, 0, FALSE);
+			o_stream_set_no_error_handling(output, TRUE);
+			o_stream_nsend_str(output, record_entry);
+			o_stream_flush(output);
+			o_stream_destroy(&output);
+		}
+
 		i_close_fd(&fd);
 	}
 
@@ -89,7 +109,7 @@ static void syncer_mail_user_deinit(struct mail_user *user) {
 
 	syncer_report_change(plug_user);
 
-	hash_table_destroy(&plug_user->guids);
+	hash_table_destroy(&plug_user->mbox_map);
 
 	plug_user->module_ctx.super.deinit(user);
 
@@ -100,11 +120,14 @@ static void syncer_mail_user_init(struct mail_user *user) {
 	struct mail_user_vfuncs *v = user->vlast;
 
 	struct syncer_mail_user *plug_user;
+	pool_t pool;
 	const char *mail_home;
 	const char *user_name;
 	const char *user_home;
 	const char *syncer_path;
 	const char *syncer_script;
+	const char * syncer_debug_text;
+	bool syncer_debug;
 
 	plug_user = p_new(user->pool, struct syncer_mail_user, 1);
 	MODULE_CONTEXT_SET(user, syncer_mail_user_module, plug_user);
@@ -113,23 +136,31 @@ static void syncer_mail_user_init(struct mail_user *user) {
 	user->vlast = &plug_user->module_ctx.super;
 	v->deinit = syncer_mail_user_deinit;
 
+	pool = user->pool;
 	mail_home = user->set->mail_home;
 	user_name = user->username;
 	user_home = mail_user_home_expand(user, "");
 	syncer_path = mail_user_plugin_getenv(user, "syncer_path");
 	syncer_script = mail_user_plugin_getenv(user, "syncer_script");
+	syncer_debug_text = mail_user_plugin_getenv(user, "syncer_debug");
 
 	if (!syncer_path) {
 		syncer_path = "syncer";
 	}
 
+	syncer_debug = (syncer_debug_text != NULL)
+			&& (strcmp(syncer_debug_text, "yes") == 0);
+
+	plug_user->pool = pool;
 	plug_user->mail_home = mail_home;
 	plug_user->user_name = user_name;
 	plug_user->user_home = user_home;
 	plug_user->syncer_path = syncer_path;
 	plug_user->syncer_script = syncer_script;
+	plug_user->syncer_debug = syncer_debug;
 
-	hash_table_create(&plug_user->guids, user->pool, 0, str_hash, strcmp);
+	hash_table_create(&plug_user->mbox_map, plug_user->pool, 0, str_hash,
+			strcmp);
 
 }
 
@@ -186,9 +217,9 @@ static void syncer_mail_user_init(struct mail_user *user) {
 //
 //}
 
-static void syncer_remember_change(struct mailbox *mbox, const char * mode) {
+static void syncer_remember_change(struct mailbox *mbox, const char * change) {
 
-	UNUSED(mode);
+//	i_info("%s : name=%s ", __func__, mbox->name);
 
 	struct syncer_mail_user *plug_user = SYNCER_USER_CONTEXT(
 			mbox->storage->user);
@@ -197,9 +228,21 @@ static void syncer_remember_change(struct mailbox *mbox, const char * mode) {
 	mailbox_get_metadata(mbox, MAILBOX_METADATA_GUID, &mbox_meta);
 
 	const char *guid_text;
-	guid_text = i_strdup(guid_128_to_string(mbox_meta.guid));
+	guid_text = guid_128_to_string(mbox_meta.guid);
 
-	hash_table_insert(plug_user->guids, guid_text, NULL);
+	if (hash_table_lookup(plug_user->mbox_map, guid_text)) {
+		return;
+	} else {
+		const char *mbox_guid;
+		const char *mbox_name;
+		struct syncer_mbox_info *mbox_info;
+		mbox_guid = p_strdup(plug_user->pool, guid_text);
+		mbox_name = p_strdup(plug_user->pool, mbox->name);
+		mbox_info = p_new(plug_user->pool, struct syncer_mbox_info, 1);
+		mbox_info->change = change;
+		mbox_info->mbox_name = mbox_name;
+		hash_table_insert(plug_user->mbox_map, mbox_guid, mbox_info);
+	}
 
 }
 
