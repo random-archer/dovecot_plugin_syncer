@@ -40,7 +40,7 @@ struct syncer_mail_user {
 	const char *mail_home;
 	const char *user_name;
 	const char *user_home;
-	const char *syncer_path;
+	const char *syncer_dir;
 	const char *syncer_script;
 	bool syncer_debug;
 	HASH_TABLE(const char *, struct syncer_mbox_info *)
@@ -48,28 +48,35 @@ struct syncer_mail_user {
 };
 
 static void syncer_ensure_folder(const char * path) {
-	struct stat st = { 0 };
-	if (stat(path, &st) == -1) {
+	struct stat data = { 0 };
+	if (stat(path, &data) == -1) {
 		mkdir(path, 0700);
 	}
 }
 
 static void syncer_report_change(struct syncer_mail_user *plug_user) {
 
-	int fd;
-	struct ostream *output;
-	const char *syncer_path;
-	const char *record_path;
-
 	const char *mbox_guid;
 	struct syncer_mbox_info * mbox_info;
+
+	int fd;
+	struct ostream *output;
+	const char *record_guid;
+	const char *record_type;
+	const char *syncer_dir;
+	const char *syncer_dir_guid;
+	const char *syncer_dir_type;
 
 	struct hash_iterate_context *iter;
 	iter = hash_table_iterate_init(plug_user->mbox_map);
 
-	syncer_path = i_strconcat(plug_user->mail_home, "/", plug_user->syncer_path,
+	syncer_dir = i_strconcat(plug_user->mail_home, "/", plug_user->syncer_dir,
 	NULL);
-	syncer_ensure_folder(syncer_path);
+	syncer_dir_guid = i_strconcat(syncer_dir, "/guid", NULL);
+	syncer_dir_type = i_strconcat(syncer_dir, "/type", NULL);
+	syncer_ensure_folder(syncer_dir);
+	syncer_ensure_folder(syncer_dir_guid);
+	syncer_ensure_folder(syncer_dir_type);
 
 	while (hash_table_iterate(iter, plug_user->mbox_map, &mbox_guid, &mbox_info)) {
 
@@ -78,9 +85,9 @@ static void syncer_report_change(struct syncer_mail_user *plug_user) {
 					mbox_info->change, mbox_guid, mbox_info->mbox_name);
 		}
 
-		record_path = i_strconcat(syncer_path, "/", mbox_guid, NULL);
-
-		fd = open(record_path, O_RDWR | O_CREAT | O_TRUNC, 0600);
+		// report change by mbox
+		record_guid = i_strconcat(syncer_dir_guid, "/", mbox_guid, NULL);
+		fd = open(record_guid, O_RDWR | O_CREAT | O_TRUNC, 0600);
 
 		if (plug_user->syncer_debug) {
 			const char *record_entry;
@@ -95,8 +102,14 @@ static void syncer_report_change(struct syncer_mail_user *plug_user) {
 			o_stream_flush(output);
 			o_stream_destroy(&output);
 		}
-
 		i_close_fd(&fd);
+
+		// report change by type
+		record_type = i_strconcat(syncer_dir_type, "/", mbox_info->change,
+		NULL);
+		fd = open(record_type, O_RDWR | O_CREAT | O_TRUNC, 0600);
+		i_close_fd(&fd);
+
 	}
 
 	hash_table_iterate_deinit(&iter);
@@ -124,7 +137,7 @@ static void syncer_mail_user_init(struct mail_user *user) {
 	const char *mail_home;
 	const char *user_name;
 	const char *user_home;
-	const char *syncer_path;
+	const char *syncer_dir;
 	const char *syncer_script;
 	const char * syncer_debug_text;
 	bool syncer_debug;
@@ -140,12 +153,12 @@ static void syncer_mail_user_init(struct mail_user *user) {
 	mail_home = user->set->mail_home;
 	user_name = user->username;
 	user_home = mail_user_home_expand(user, "");
-	syncer_path = mail_user_plugin_getenv(user, "syncer_path");
+	syncer_dir = mail_user_plugin_getenv(user, "syncer_dir");
 	syncer_script = mail_user_plugin_getenv(user, "syncer_script");
 	syncer_debug_text = mail_user_plugin_getenv(user, "syncer_debug");
 
-	if (!syncer_path) {
-		syncer_path = "syncer";
+	if (!syncer_dir) {
+		syncer_dir = "syncer";
 	}
 
 	syncer_debug = (syncer_debug_text != NULL)
@@ -155,7 +168,7 @@ static void syncer_mail_user_init(struct mail_user *user) {
 	plug_user->mail_home = mail_home;
 	plug_user->user_name = user_name;
 	plug_user->user_home = user_home;
-	plug_user->syncer_path = syncer_path;
+	plug_user->syncer_dir = syncer_dir;
 	plug_user->syncer_script = syncer_script;
 	plug_user->syncer_debug = syncer_debug;
 

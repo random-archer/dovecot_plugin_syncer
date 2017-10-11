@@ -24,12 +24,13 @@ dovecot_stop() {
 
 initialize() {
     echo "# cleanup"
-    sudo rm -r -f /etc/dovecot/*
+    sudo rm -r -f "/etc/dovecot"/*
     
     echo "# provision"
     sudo cp -v -a -r ${0%/*}/etc /
         
     readonly user="arkon@private.dom"
+    readonly home="/etc/dovecot/data/private.dom/arkon"
     readonly wait="0.1"
     
     dovecot_start
@@ -89,3 +90,6 @@ sleep "$wait"
 echo "# mailbox delete"
 sudo doveadm mailbox delete -u "$user" 'tester' 
 sleep "$wait"
+
+echo "# report change"
+sudo ls -Rlas "$home/syncer/"

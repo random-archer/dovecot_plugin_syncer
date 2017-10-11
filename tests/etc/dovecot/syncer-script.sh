@@ -1,5 +1,9 @@
 #!/bin/bash
 
+#
+# TODO
+#
+
 set -e -u
 
 echo "\
