@@ -265,7 +265,7 @@ static void syncer_mailbox_create(struct mailbox *mbox) {
 
 static void * syncer_mailbox_delete(struct mailbox *mbox) {
 	syncer_remember_change(mbox, "mailbox_delete");
-	return NULL;
+	return NULL; // TODO
 }
 
 static void syncer_mailbox_update(struct mailbox *mbox) {

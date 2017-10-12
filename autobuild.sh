@@ -13,8 +13,9 @@ provision_packages() {
         return 0
     fi
     sudo pacman -S \
-        base-devel \
-        dovecot 
+        dovecot \
+        pigeonhole \
+        base-devel
 }
 
 generate_configure() {

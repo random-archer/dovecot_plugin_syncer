@@ -31,6 +31,12 @@ initialize() {
         
     readonly user="arkon@private.dom"
     readonly home="/etc/dovecot/data/private.dom/arkon"
+    readonly sieve_script="$home/sieve/active.sieve"
+    readonly sieve_filter=(
+        'require "fileinto" ;'
+        'if header :contains "subject" "2"'
+        '{ fileinto "tester" ; }'
+    )
     readonly wait="0.1"
     
     dovecot_start
@@ -59,8 +65,13 @@ echo -e "Subject: 3 \n save 3" | sudo doveadm save -u "$user" -m 'INBOX'
 echo -e "Subject: 4 \n save 4" | sudo doveadm save -u "$user" -m 'INBOX'
 sleep "$wait"
 
+echo "# sieve filter"
+echo "${sieve_filter[@]}" | sudo doveadm sieve put -u "$user" 'filter'
+sudo doveadm sieve activate -u "$user" 'filter'
+sudo sieve-filter -e -W -u "$user" "$sieve_script" 'INBOX'
+
 echo "# mail search"
-sudo doveadm search -u "$user" Subject 2 OR Subject 3  
+sudo doveadm search -u "$user" Subject 2
 sleep "$wait"
 
 echo "# mail copy"
