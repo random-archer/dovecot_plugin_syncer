@@ -30,7 +30,7 @@ static MODULE_CONTEXT_DEFINE_INIT(syncer_mail_user_module, &mail_user_module_reg
 ;
 
 struct syncer_mbox_info {
-	const char *change;
+	const char *chng_type;
 	const char *mbox_name;
 };
 
@@ -81,8 +81,8 @@ static void syncer_report_change(struct syncer_mail_user *plug_user) {
 	while (hash_table_iterate(iter, plug_user->mbox_map, &mbox_guid, &mbox_info)) {
 
 		if (plug_user->syncer_debug) {
-			i_info("%s : change=%s mbox_guid=%s mbox_name=%s", __func__, //
-					mbox_info->change, mbox_guid, mbox_info->mbox_name);
+			i_info("%s : chng_type=%s mbox_guid=%s mbox_name='%s'", __func__,
+					mbox_info->chng_type, mbox_guid, mbox_info->mbox_name);
 		}
 
 		// report change by mbox
@@ -92,7 +92,7 @@ static void syncer_report_change(struct syncer_mail_user *plug_user) {
 		if (plug_user->syncer_debug) {
 			const char *record_entry;
 			record_entry = i_strconcat( //
-					"change=", mbox_info->change, " ", //
+					"chng_type=", mbox_info->chng_type, " ", //
 					"mbox_guid=", mbox_guid, " ", //
 					"mbox_name='", mbox_info->mbox_name, "' ", //
 					NULL);
@@ -105,7 +105,7 @@ static void syncer_report_change(struct syncer_mail_user *plug_user) {
 		i_close_fd(&fd);
 
 		// report change by type
-		record_type = i_strconcat(syncer_dir_type, "/", mbox_info->change,
+		record_type = i_strconcat(syncer_dir_type, "/", mbox_info->chng_type,
 		NULL);
 		fd = open(record_type, O_RDWR | O_CREAT | O_TRUNC, 0600);
 		i_close_fd(&fd);
@@ -230,7 +230,7 @@ static void syncer_mail_user_init(struct mail_user *user) {
 //
 //}
 
-static void syncer_remember_change(struct mailbox *mbox, const char * change) {
+static void syncer_remember_change(struct mailbox *mbox, const char * chng_type) {
 
 //	i_info("%s : name=%s ", __func__, mbox->name);
 
@@ -252,7 +252,7 @@ static void syncer_remember_change(struct mailbox *mbox, const char * change) {
 		mbox_guid = p_strdup(plug_user->pool, guid_text);
 		mbox_name = p_strdup(plug_user->pool, mbox->name);
 		mbox_info = p_new(plug_user->pool, struct syncer_mbox_info, 1);
-		mbox_info->change = change;
+		mbox_info->chng_type = chng_type;
 		mbox_info->mbox_name = mbox_name;
 		hash_table_insert(plug_user->mbox_map, mbox_guid, mbox_info);
 	}
