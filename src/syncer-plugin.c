@@ -365,6 +365,9 @@ static struct mail_storage_hooks syncer_mail_storage_hooks = {
 //
 		};
 
+// Plugin interface
+
+const char *syncer_plugin_version = DOVECOT_ABI_VERSION;
 const char *syncer_plugin_dependencies[] = { "notify", NULL };
 
 void syncer_plugin_init(struct module *module) {
