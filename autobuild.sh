@@ -9,7 +9,7 @@ set -e -u
 
 provision_packages() {
     echo "# $FUNCNAME"
-    if pacman -Q dovecot ; then
+    if pacman -Q dovecot && pacman -Q pigeonhole ; then
         return 0
     fi
     sudo pacman -S \
