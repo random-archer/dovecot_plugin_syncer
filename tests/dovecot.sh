@@ -4,7 +4,28 @@
 # invoke basic tests with dovecot server
 #
 
-set -e -u
+set -u -e -E
+
+piper_service() {
+    echo "# piper start"
+    [[ -p $pipe ]] || {
+        mkfifo $pipe
+        chmod 0600 $pipe # non-blocking
+    }
+    #
+    local line= ; 
+    while true ; do # re-connect pipe w/o loss
+        exec 3<$pipe
+        exec 4<&-
+        while read -r line; do # read report record
+            echo "piper: $line"
+        done <&3
+        exec 4<&3
+        exec 3<&-
+    done
+    #
+    echo "# piper finish"
+}
 
 dovecot_start() {
     sudo systemctl start dovecot
@@ -31,6 +52,8 @@ initialize() {
         
     readonly user="arkon@private.dom"
     readonly home="/etc/dovecot/data/private.dom/arkon"
+    mkdir -p $home
+    readonly pipe="$home/syncer.pipe"
     readonly sieve_script="$home/sieve/active.sieve"
     readonly sieve_filter=(
         'require "fileinto" ;'
@@ -39,11 +62,17 @@ initialize() {
     )
     readonly wait="0.1"
     
+    (piper_service) &
+    
     dovecot_start
 }
 
 terminate() {
+    #
     dovecot_stop
+    #
+    local list=$(jobs -p)
+    if [[ $list ]] ; then kill $list; fi # stop subs
 }
 
 trap terminate EXIT
@@ -103,4 +132,4 @@ sudo doveadm mailbox delete -u "$user" 'tester'
 sleep "$wait"
 
 echo "# report change"
-sudo ls -Rlas "$home/syncer/"
+sudo ls -Rlas "$home/syncer"*

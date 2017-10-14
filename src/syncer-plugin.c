@@ -34,22 +34,48 @@ struct syncer_mbox_info {
 	const char *mbox_name;
 };
 
+// plugin context
 struct syncer_mail_user {
-	// resources
+
+	//
 	union mail_user_module_context module_ctx;
+
+	//
 	pool_t pool;
-	// parameters
+
+	//
 	const char *user_name;
+
+	//
 	const char *user_home;
-	const char *mail_home; // mail home directory
-	// plugin settings
-	const char *syncer_dir; // name of report direcotry
-	const char *syncer_script; // TODO
-	bool syncer_notice; // enable plugin message logging
-	bool syncer_content; // provide content in report files
+
+	//
+	const char *mail_home;
+
+	// enable plugin message logging
+	bool syncer_use_notice;
+
+	// name of report direcotry
+	const char *syncer_dir;
+
+	// enable dir/file based reporting
+	bool syncer_use_dir;
+
+	// provide content in report guid files
+	bool syncer_use_content;
+
+	// name of report fifo pipe
+	const char *syncer_pipe;
+
+	// enable fifo/pipe based reporting
+	bool syncer_use_pipe;
+
+	// TODO
+	const char *syncer_script;
+
 	// collected changes
 	HASH_TABLE(const char *, struct syncer_mbox_info *)
-	mbox_map; // guid => info
+	mbox_maps; // guid => info
 };
 
 static void syncer_ensure_folder(const char * path) {
@@ -59,89 +85,88 @@ static void syncer_ensure_folder(const char * path) {
 	}
 }
 
+static void syncer_ensure_pipe(const char * path) {
+	struct stat data = { 0 };
+	if (stat(path, &data) == -1) {
+		mkfifo(path, 0600);
+	}
+}
+
+static const char * syncer_record_eol = "\n";
+
 static void syncer_report_change(struct syncer_mail_user *plug_user) {
 
-	const char *mbox_guid;
-	struct syncer_mbox_info * mbox_info;
+	if ( hash_table_count(plug_user->mbox_maps) == 0) {
+		return; // nothing to report
+	}
 
-	int fd;
-	struct ostream *output;
-	const char *record_guid;
-	const char *record_type;
-	const char *syncer_dir;
-	const char *syncer_dir_guid;
-	const char *syncer_dir_type;
+	// pipe reports
+	const char *syncer_pipe = i_strconcat(plug_user->mail_home, "/", plug_user->syncer_pipe, NULL);
+	syncer_ensure_pipe(syncer_pipe);
+	int fd_pipe = open(syncer_pipe, O_RDWR); // non-blocking
 
-	struct hash_iterate_context *iter;
-	iter = hash_table_iterate_init(plug_user->mbox_map);
-
-	syncer_dir = i_strconcat(plug_user->mail_home, "/", plug_user->syncer_dir,
-	NULL);
-	syncer_dir_guid = i_strconcat(syncer_dir, "/guid", NULL);
-	syncer_dir_type = i_strconcat(syncer_dir, "/type", NULL);
+	// dir/file reports
+	const char *syncer_dir = i_strconcat(plug_user->mail_home, "/", plug_user->syncer_dir, NULL);
+	const char *syncer_dir_guid = i_strconcat(syncer_dir, "/guid", NULL);
+	const char *syncer_dir_type = i_strconcat(syncer_dir, "/type", NULL);
 	syncer_ensure_folder(syncer_dir);
 	syncer_ensure_folder(syncer_dir_guid);
 	syncer_ensure_folder(syncer_dir_type);
 
-	while (hash_table_iterate(iter, plug_user->mbox_map, &mbox_guid, &mbox_info)) {
+	const char *mbox_guid;
+	struct syncer_mbox_info * mbox_info;
+	struct hash_iterate_context *iter = hash_table_iterate_init(plug_user->mbox_maps);
+	while (hash_table_iterate(iter, plug_user->mbox_maps, &mbox_guid, &mbox_info)) {
 
-		if (plug_user->syncer_notice) { // optional plugin messages
-			i_info("%s : chng_type=%s mbox_guid=%s mbox_name='%s'", __func__,
-					mbox_info->chng_type, mbox_guid, mbox_info->mbox_name);
+		const char *record_entry = i_strconcat( //
+				"chng_type=", mbox_info->chng_type, " ", //
+				"mbox_guid=", mbox_guid, " ", //
+				"mbox_name='", mbox_info->mbox_name, "' ", //
+				NULL);
+
+		if (plug_user->syncer_use_notice) { // optional plugin messages
+			i_info("%s : %s", __func__, record_entry);
 		}
 
-		// report change by mbox
-		record_guid = i_strconcat(syncer_dir_guid, "/", mbox_guid, NULL);
-		fd = open(record_guid, O_RDWR | O_CREAT | O_TRUNC, 0600);
-
-		if (plug_user->syncer_content) { // optional report content
-			const char *record_entry;
-			record_entry = i_strconcat( //
-					"chng_type=", mbox_info->chng_type, " ", //
-					"mbox_guid=", mbox_guid, " ", //
-					"mbox_name='", mbox_info->mbox_name, "' ", //
-					NULL);
-			output = o_stream_create_fd(fd, 0, FALSE);
-			o_stream_set_no_error_handling(output, TRUE);
-			o_stream_nsend_str(output, record_entry);
-			o_stream_flush(output);
-			o_stream_destroy(&output);
+		if (plug_user->syncer_use_pipe) {
+			// report change to non-blocking fifo pipe
+			write(fd_pipe, record_entry, strlen(record_entry));
+			write(fd_pipe, syncer_record_eol, strlen(syncer_record_eol));
 		}
-		i_close_fd(&fd);
 
-		// report change by type
-		record_type = i_strconcat(syncer_dir_type, "/", mbox_info->chng_type,
-		NULL);
-		fd = open(record_type, O_RDWR | O_CREAT | O_TRUNC, 0600);
-		i_close_fd(&fd);
+		if (plug_user->syncer_use_dir) {
+			// report change by mbox
+			const char *record_guid = i_strconcat(syncer_dir_guid, "/", mbox_guid, NULL);
+			int fd_mbox = open(record_guid, O_RDWR | O_CREAT | O_TRUNC, 0600);
+			if (plug_user->syncer_use_content) { // optional report content
+				struct ostream *output = o_stream_create_fd(fd_mbox, 0, FALSE);
+				o_stream_set_no_error_handling(output, TRUE);
+				o_stream_nsend_str(output, record_entry);
+				o_stream_flush(output);
+				o_stream_destroy(&output);
+			}
+			i_close_fd(&fd_mbox);
+			// report change by type
+			const char *record_type = i_strconcat(syncer_dir_type, "/", mbox_info->chng_type, NULL);
+			int fd_type = open(record_type, O_RDWR | O_CREAT | O_TRUNC, 0600);
+			i_close_fd(&fd_type);
+		}
 
 	}
+
+	i_close_fd(&fd_pipe);
 
 	hash_table_iterate_deinit(&iter);
 
 }
 
-static void syncer_mail_user_deinit(struct mail_user *user) {
-
-	struct syncer_mail_user *plug_user = SYNCER_USER_CONTEXT(user);
-
-	syncer_report_change(plug_user);
-
-	hash_table_destroy(&plug_user->mbox_map);
-
-	plug_user->module_ctx.super.deinit(user);
-
-}
-
-static const char * syncer_plugin_getenv_text(struct mail_user *user,
-		const char * key, const char * value) {
+static const char * syncer_plugin_getenv_text(struct mail_user *user, const char * key, const char * value) {
 	const char * text = mail_user_plugin_getenv(user, key);
 	text = text == NULL ? value : text;
 	return text;
 }
 
-static bool syncer_plugin_getenv_bool(struct mail_user *user, const char * key,
-		const char * value) {
+static bool syncer_plugin_getenv_bool(struct mail_user *user, const char * key, const char * value) {
 	const char * text = syncer_plugin_getenv_text(user, key, value);
 	switch (text[0]) {
 	case '1':
@@ -155,64 +180,65 @@ static bool syncer_plugin_getenv_bool(struct mail_user *user, const char * key,
 	}
 }
 
-static const char * KEY_SYNCER_DIR = "syncer_dir";
-static const char * VAL_SYNCER_DIR = "syncer";
+static const char * KEY_DIR = "syncer_dir";
+static const char * VAL_DIR = "syncer";
 
-static const char * KEY_SYNCER_SCRIPT = "syncer_script";
-static const char * VAL_SYNCER_SCRIPT = "/etc/dovecot/syncer-script.sh";
+static const char * KEY_USE_DIR = "syncer_use_dir";
+static const char * VAL_USE_DIR = "false";
 
-static const char * KEY_SYNCER_NOTICE = "syncer_notice";
-static const char * VAL_SYNCER_NOTICE = "no";
+static const char * KEY_USE_CONTENT = "syncer_use_content";
+static const char * VAL_USE_CONTENT = "false";
 
-static const char * KEY_SYNCER_CONTENT = "syncer_content";
-static const char * VAL_SYNCER_CONTENT = "no";
+static const char * KEY_PIPE = "syncer_pipe";
+static const char * VAL_PIPE = "syncer.pipe";
+
+static const char * KEY_USE_PIPE = "syncer_use_pipe";
+static const char * VAL_USE_PIPE = "false";
+
+static const char * KEY_SCRIPT = "syncer_script";
+static const char * VAL_SCRIPT = "/etc/dovecot/syncer-script.sh";
+
+static const char * KEY_USE_NOTICE = "syncer_use_notice";
+static const char * VAL_USE_NOTICE = "false";
+
+static void syncer_mail_user_deinit(struct mail_user *user) {
+	struct syncer_mail_user *plug_user = SYNCER_USER_CONTEXT(user);
+	syncer_report_change(plug_user);
+	hash_table_destroy(&plug_user->mbox_maps);
+	plug_user->module_ctx.super.deinit(user);
+}
 
 static void syncer_mail_user_init(struct mail_user *user) {
 
+	struct syncer_mail_user *plug_user;
 	struct mail_user_vfuncs *v = user->vlast;
 
-	struct syncer_mail_user *plug_user;
-	pool_t pool;
-	const char *mail_home;
-	const char *user_name;
-	const char *user_home;
-	const char *syncer_dir;
-	const char *syncer_script;
-	bool syncer_notice;
-	bool syncer_content;
-
+	// plugin context
 	plug_user = p_new(user->pool, struct syncer_mail_user, 1);
 	MODULE_CONTEXT_SET(user, syncer_mail_user_module, plug_user);
 
+	// call back setup
 	plug_user->module_ctx.super = *v;
 	user->vlast = &plug_user->module_ctx.super;
 	v->deinit = syncer_mail_user_deinit;
 
-	pool = user->pool;
-	mail_home = user->set->mail_home;
-	user_name = user->username;
-	user_home = mail_user_home_expand(user, "");
+	// user parameters
+	plug_user->mail_home = user->set->mail_home;
+	plug_user->user_name = user->username;
+	plug_user->user_home = mail_user_home_expand(user, "");
+	plug_user->pool = user->pool;
 
-	syncer_dir = syncer_plugin_getenv_text(user, //
-			KEY_SYNCER_DIR, VAL_SYNCER_DIR);
-	syncer_script = syncer_plugin_getenv_text(user, //
-			KEY_SYNCER_SCRIPT, VAL_SYNCER_SCRIPT);
-	syncer_notice = syncer_plugin_getenv_bool(user, //
-			KEY_SYNCER_NOTICE, VAL_SYNCER_NOTICE);
-	syncer_content = syncer_plugin_getenv_bool(user, //
-			KEY_SYNCER_CONTENT, VAL_SYNCER_CONTENT);
+	// plugin settings
+	plug_user->syncer_dir = syncer_plugin_getenv_text(user, KEY_DIR, VAL_DIR);
+	plug_user->syncer_use_dir = syncer_plugin_getenv_text(user, KEY_USE_DIR, VAL_USE_DIR);
+	plug_user->syncer_use_content = syncer_plugin_getenv_bool(user, KEY_USE_CONTENT, VAL_USE_CONTENT);
+	plug_user->syncer_pipe = syncer_plugin_getenv_text(user, KEY_PIPE, VAL_PIPE);
+	plug_user->syncer_use_pipe = syncer_plugin_getenv_text(user, KEY_USE_PIPE, VAL_USE_PIPE);
+	plug_user->syncer_script = syncer_plugin_getenv_text(user, KEY_SCRIPT, VAL_SCRIPT);
+	plug_user->syncer_use_notice = syncer_plugin_getenv_bool(user, KEY_USE_NOTICE, VAL_USE_NOTICE);
 
-	plug_user->pool = pool;
-	plug_user->mail_home = mail_home;
-	plug_user->user_name = user_name;
-	plug_user->user_home = user_home;
-	plug_user->syncer_dir = syncer_dir;
-	plug_user->syncer_script = syncer_script;
-	plug_user->syncer_notice = syncer_notice;
-	plug_user->syncer_content = syncer_content;
-
-	hash_table_create(&plug_user->mbox_map, plug_user->pool, 0, str_hash,
-			strcmp);
+	// collected reports
+	hash_table_create(&plug_user->mbox_maps, plug_user->pool, 0, str_hash, strcmp);
 
 }
 
@@ -271,8 +297,7 @@ static void syncer_mail_user_init(struct mail_user *user) {
 
 static void syncer_remember_change(struct mailbox *mbox, const char * chng_type) {
 
-	struct syncer_mail_user *plug_user = SYNCER_USER_CONTEXT(
-			mbox->storage->user);
+	struct syncer_mail_user *plug_user = SYNCER_USER_CONTEXT(mbox->storage->user);
 
 	struct mailbox_metadata mbox_meta;
 	mailbox_get_metadata(mbox, MAILBOX_METADATA_GUID, &mbox_meta);
@@ -280,7 +305,7 @@ static void syncer_remember_change(struct mailbox *mbox, const char * chng_type)
 	const char *guid_text;
 	guid_text = guid_128_to_string(mbox_meta.guid);
 
-	if (hash_table_lookup(plug_user->mbox_map, guid_text)) {
+	if (hash_table_lookup(plug_user->mbox_maps, guid_text)) {
 		return;
 	} else {
 		const char *mbox_guid;
@@ -291,7 +316,7 @@ static void syncer_remember_change(struct mailbox *mbox, const char * chng_type)
 		mbox_info = p_new(plug_user->pool, struct syncer_mbox_info, 1);
 		mbox_info->chng_type = chng_type;
 		mbox_info->mbox_name = mbox_name;
-		hash_table_insert(plug_user->mbox_map, mbox_guid, mbox_info);
+		hash_table_insert(plug_user->mbox_maps, mbox_guid, mbox_info);
 	}
 
 }
@@ -330,15 +355,13 @@ static void syncer_mail_expunge(void *txn, struct mail *mail) {
 	syncer_remember_change(mail->box, "mail_expunge");
 }
 
-static void syncer_mail_update_flags(void *txn, struct mail *mail,
-		enum mail_flags old_flags) {
+static void syncer_mail_update_flags(void *txn, struct mail *mail, enum mail_flags old_flags) {
 	UNUSED(txn);
 	UNUSED(old_flags);
 	syncer_remember_change(mail->box, "mail_update_flags");
 }
 
-static void syncer_mail_update_keywords(void *txn, struct mail *mail,
-		const char * const *old_keywords) {
+static void syncer_mail_update_keywords(void *txn, struct mail *mail, const char * const *old_keywords) {
 	UNUSED(txn);
 	UNUSED(old_keywords);
 	syncer_remember_change(mail->box, "mail_update_keywords");
