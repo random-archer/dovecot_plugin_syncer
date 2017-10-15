@@ -8,6 +8,13 @@
 
 # automake
 
+/NEWS
+/README
+/AUTHORS
+/INSTALL
+/COPYING
+/ChangeLog
+
 Makefile
 Makefile.in
 
@@ -40,10 +47,10 @@ Makefile.in
 /missing
 /test-driver
 
-/ChangeLog
-
-/define.h
-/define.h.in
+/config-default.h
+/config-default.h.in
+/config-syncer.h
+!config-syncer.h.in
 
 /stamp-*
 

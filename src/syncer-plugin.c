@@ -1,6 +1,12 @@
-//#include <define.h>
+/*
+ * dovecot plugin: syncer
+ *
+ * provide support for full multi-node multi-master mail store replication
+ */
 
-#include <sys/wait.h>
+#include <config-syncer.h>
+
+//#include <sys/wait.h>
 
 #include "lib.h"
 #include "hash.h"
@@ -31,7 +37,7 @@ static MODULE_CONTEXT_DEFINE_INIT(syncer_mail_user_module, &mail_user_module_reg
 ;
 
 static const char * KEY_DIR = "syncer_dir";
-static const char * VAL_DIR = "/run/dovecot/syncer/dir";
+static const char * VAL_DIR = "~/syncer";
 
 static const char * KEY_USE_DIR = "syncer_use_dir";
 static const char * VAL_USE_DIR = "false";
@@ -48,14 +54,19 @@ static const char * VAL_USE_PIPE = "false";
 static const char * KEY_SCRIPT = "syncer_script";
 static const char * VAL_SCRIPT = "/etc/dovecot/syncer-script.sh";
 
-static const char * KEY_USE_NOTICE = "syncer_use_notice";
-static const char * VAL_USE_NOTICE = "false";
+static const char * KEY_USE_LOG = "syncer_use_log";
+static const char * VAL_USE_LOG = "false";
 
 static const char * KEY_DIR_MODE = "syncer_dir_mode";
 static const char * VAL_DIR_MODE = "0755";
 
 static const char * KEY_FILE_MODE = "syncer_file_mode";
 static const char * VAL_FILE_MODE = "0644";
+
+// plugin identity name
+static const char *syncer_package_name = SYNCER_NAME;
+// plugin identity version
+static const char *syncer_package_version = SYNCER_VERSION;
 
 struct syncer_mbox_info {
 	const char *user_name;
@@ -77,15 +88,12 @@ struct syncer_mail_user {
 	const char *user_name;
 
 	//
-	const char *user_home;
-
-	//
 	const char *mail_home;
 
 	// enable plugin message logging
-	bool syncer_use_notice;
+	bool syncer_use_log;
 
-	// name of report direcotry
+	// name of report directory
 	const char *syncer_dir;
 
 	// enable dir/file based reporting
@@ -136,6 +144,13 @@ static void syncer_ensure_pipe(const char * path, int dir_mode, int file_mode) {
 static const char * syncer_record_sep = "\t";
 static const char * syncer_record_eol = "\n";
 
+static void syncer_log_info(const char *fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	i_info("%s[%s]/%s", syncer_package_name, syncer_package_version, t_strdup_vprintf(fmt, args));
+	va_end(args);
+}
+
 static void syncer_report_change(struct syncer_mail_user *plug_user) {
 
 	if ( hash_table_count(plug_user->mbox_maps) == 0) {
@@ -167,9 +182,9 @@ static void syncer_report_change(struct syncer_mail_user *plug_user) {
 				"mbox_guid=", mbox_info->mbox_guid, syncer_record_sep, //
 				NULL);
 
-		if (plug_user->syncer_use_notice) {
+		if (plug_user->syncer_use_log) {
 			// optional plugin messages
-			i_info("%s : %s", __func__, record_entry);
+			syncer_log_info("%s : %s", __func__, record_entry);
 		}
 
 		if (plug_user->syncer_use_pipe) {
@@ -230,6 +245,7 @@ static int syncer_plugin_getenv_octal(struct mail_user *user, const char * key, 
 	return (int) strtol(text, NULL, 8);
 }
 
+// plugin session termination
 static void syncer_mail_user_deinit(struct mail_user *user) {
 	struct syncer_mail_user *plug_user = SYNCER_USER_CONTEXT(user);
 	syncer_report_change(plug_user);
@@ -237,6 +253,7 @@ static void syncer_mail_user_deinit(struct mail_user *user) {
 	plug_user->module_ctx.super.deinit(user);
 }
 
+// plugin session initialization
 static void syncer_mail_user_init(struct mail_user *user) {
 
 	struct syncer_mail_user *plug_user;
@@ -254,7 +271,6 @@ static void syncer_mail_user_init(struct mail_user *user) {
 	// user parameters
 	plug_user->mail_home = user->set->mail_home;
 	plug_user->user_name = user->username;
-	plug_user->user_home = mail_user_home_expand(user, "");
 	plug_user->pool = user->pool;
 
 	// plugin settings
@@ -264,15 +280,14 @@ static void syncer_mail_user_init(struct mail_user *user) {
 	plug_user->syncer_pipe = syncer_plugin_getenv_text(user, KEY_PIPE, VAL_PIPE);
 	plug_user->syncer_use_pipe = syncer_plugin_getenv_text(user, KEY_USE_PIPE, VAL_USE_PIPE);
 	plug_user->syncer_script = syncer_plugin_getenv_text(user, KEY_SCRIPT, VAL_SCRIPT);
-	plug_user->syncer_use_notice = syncer_plugin_getenv_bool(user, KEY_USE_NOTICE, VAL_USE_NOTICE);
+	plug_user->syncer_use_log = syncer_plugin_getenv_bool(user, KEY_USE_LOG, VAL_USE_LOG);
 	plug_user->syncer_dir_mode = syncer_plugin_getenv_octal(user, KEY_DIR_MODE, VAL_DIR_MODE);
 	plug_user->syncer_file_mode = syncer_plugin_getenv_octal(user, KEY_FILE_MODE, VAL_FILE_MODE);
 
-	i_assert(plug_user->syncer_dir[0] == '/');
-	i_assert(plug_user->syncer_pipe[0] == '/');
-	i_assert(plug_user->syncer_script[0] == '/');
+	// resolve relative path
+	plug_user->syncer_dir = p_strdup(plug_user->pool, mail_user_home_expand(user, plug_user->syncer_dir));
 
-	// collected reports
+	// collected changes
 	hash_table_create(&plug_user->mbox_maps, plug_user->pool, 0, str_hash, strcmp);
 
 }
@@ -416,15 +431,14 @@ static const struct notify_vfuncs syncer_vfuncs = {
 
 static struct mail_storage_hooks syncer_mail_storage_hooks = {
 //
-		.mail_user_created = syncer_mail_user_init, //
+		.mail_user_created = syncer_mail_user_init,			//
 //
 		};
 
-// Plugin interface
+// plugin interface
 
 const char *syncer_plugin_version = DOVECOT_ABI_VERSION;
 const char *syncer_plugin_dependencies[] = { "notify", NULL };
-const char *syncer_plugin_package_string = PACKAGE_STRING;
 
 void syncer_plugin_init(struct module *module) {
 	syncer_context = notify_register(&syncer_vfuncs);

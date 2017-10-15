@@ -1,5 +1,5 @@
 
-AC_INIT([syncer-plugin], 11)
+AC_INIT([syncer-plugin], [11]) # name, version
 
 AC_CONFIG_SRCDIR([src])
 AC_CONFIG_MACRO_DIR([m4])
@@ -8,8 +8,13 @@ AM_INIT_AUTOMAKE([no-define foreign tar-ustar])
 ACLOCAL_AMFLAGS='-I $(top_srcdir)/m4'
 AC_SUBST(ACLOCAL_AMFLAGS)
 
-AC_CONFIG_HEADERS([define.h])
+# ignore 'default', include 'syncer'
+AC_CONFIG_HEADERS([config-default.h config-syncer.h])
 
+# inject custom plugin definitions
+AC_DEFINE_UNQUOTED(SYNCER_NAME, "$PACKAGE_NAME", [syncer package name])
+AC_DEFINE_UNQUOTED(SYNCER_VERSION, "$PACKAGE_VERSION", [syncer package version])
+ 
 AM_MAINTAINER_MODE
 PKG_PROG_PKG_CONFIG
 

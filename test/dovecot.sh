@@ -136,4 +136,6 @@ sudo doveadm mailbox delete -u "$user" 'tester'
 sleep "$wait"
 
 echo "# report change"
+sudo ls -Rlas $home/syncer*
 sudo ls -Rlas /tmp/dovecot/syncer*
+    

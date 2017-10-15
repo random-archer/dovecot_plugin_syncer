@@ -1,0 +1,6 @@
+
+// plugin build settings
+
+#undef SYNCER_NAME
+
+#undef SYNCER_VERSION
