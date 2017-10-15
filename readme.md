@@ -4,11 +4,11 @@
 helps to create scripts for true multi-node multi-master replication 
 
 plugin listens on mailbox changes and reports them by:
-* writing a marker file `<mail_home>/syncer/<mailbox_guid>`
+* writing a marker file `<mail_home>/syncer/guid/<mailbox_guid>`
 * sending a change event to the pipe `/run/dovecot/syncer/pipe` 
 
 replication scripts then can watch for changes:
-* new files in the `syncer` folder
+* new files in the `syncer/{guid,type}` folder
 * new events in the `syncer/pipe` fifo
   
 and invoke `doveadm sync -g <mailbox_guid>` to multiple replication nodes
