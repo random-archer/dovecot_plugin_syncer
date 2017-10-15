@@ -11,6 +11,7 @@
 #include "env-util.h"
 #include "execv-const.h"
 #include "imap-util.h"
+#include "mkdir-parents.h"
 #include "mail-user.h"
 #include "mail-storage-private.h"
 #include "mail-namespace.h"
@@ -29,9 +30,38 @@ static struct notify_context *syncer_context;
 static MODULE_CONTEXT_DEFINE_INIT(syncer_mail_user_module, &mail_user_module_register)
 ;
 
+static const char * KEY_DIR = "syncer_dir";
+static const char * VAL_DIR = "/run/dovecot/syncer/dir";
+
+static const char * KEY_USE_DIR = "syncer_use_dir";
+static const char * VAL_USE_DIR = "false";
+
+static const char * KEY_USE_CONTENT = "syncer_use_content";
+static const char * VAL_USE_CONTENT = "false";
+
+static const char * KEY_PIPE = "syncer_pipe";
+static const char * VAL_PIPE = "/run/dovecot/syncer/pipe";
+
+static const char * KEY_USE_PIPE = "syncer_use_pipe";
+static const char * VAL_USE_PIPE = "false";
+
+static const char * KEY_SCRIPT = "syncer_script";
+static const char * VAL_SCRIPT = "/etc/dovecot/syncer-script.sh";
+
+static const char * KEY_USE_NOTICE = "syncer_use_notice";
+static const char * VAL_USE_NOTICE = "false";
+
+static const char * KEY_DIR_MODE = "syncer_dir_mode";
+static const char * VAL_DIR_MODE = "0755";
+
+static const char * KEY_FILE_MODE = "syncer_file_mode";
+static const char * VAL_FILE_MODE = "0644";
+
 struct syncer_mbox_info {
+	const char *user_name;
 	const char *chng_type;
 	const char *mbox_name;
+	const char *mbox_guid;
 };
 
 // plugin context
@@ -73,25 +103,37 @@ struct syncer_mail_user {
 	// TODO
 	const char *syncer_script;
 
+	// folder creation mode mask
+	int syncer_dir_mode;
+
+	// file creation mode mask
+	int syncer_file_mode;
+
 	// collected changes
 	HASH_TABLE(const char *, struct syncer_mbox_info *)
 	mbox_maps; // guid => info
 };
 
-static void syncer_ensure_folder(const char * path) {
+static void syncer_ensure_folder(const char * path, int mode) {
 	struct stat data = { 0 };
 	if (stat(path, &data) == -1) {
-		mkdir(path, 0700);
+		if (mkdir_parents(path, mode) < 0 && errno != EEXIST) {
+			i_fatal("mkdir(%s) failed: %m", path);
+		}
 	}
 }
 
-static void syncer_ensure_pipe(const char * path) {
+static void syncer_ensure_pipe(const char * path, int dir_mode, int file_mode) {
 	struct stat data = { 0 };
 	if (stat(path, &data) == -1) {
-		mkfifo(path, 0600);
+		const char *p = strrchr(path, '/');
+		const char *root = t_strdup_until(path, p);
+		syncer_ensure_folder(root, dir_mode);
+		mkfifo(path, file_mode);
 	}
 }
 
+static const char * syncer_record_sep = "\t";
 static const char * syncer_record_eol = "\n";
 
 static void syncer_report_change(struct syncer_mail_user *plug_user) {
@@ -101,17 +143,17 @@ static void syncer_report_change(struct syncer_mail_user *plug_user) {
 	}
 
 	// pipe reports
-	const char *syncer_pipe = i_strconcat(plug_user->mail_home, "/", plug_user->syncer_pipe, NULL);
-	syncer_ensure_pipe(syncer_pipe);
-	int fd_pipe = open(syncer_pipe, O_RDWR); // non-blocking
+	const char *syncer_pipe = plug_user->syncer_pipe;
+	syncer_ensure_pipe(syncer_pipe, plug_user->syncer_dir_mode, plug_user->syncer_file_mode);
+	int fd_pipe = open(syncer_pipe, O_RDWR); // non-blocking fifo pipe
 
 	// dir/file reports
-	const char *syncer_dir = i_strconcat(plug_user->mail_home, "/", plug_user->syncer_dir, NULL);
+	const char *syncer_dir = plug_user->syncer_dir;
 	const char *syncer_dir_guid = i_strconcat(syncer_dir, "/guid", NULL);
 	const char *syncer_dir_type = i_strconcat(syncer_dir, "/type", NULL);
-	syncer_ensure_folder(syncer_dir);
-	syncer_ensure_folder(syncer_dir_guid);
-	syncer_ensure_folder(syncer_dir_type);
+	syncer_ensure_folder(syncer_dir, plug_user->syncer_dir_mode);
+	syncer_ensure_folder(syncer_dir_guid, plug_user->syncer_dir_mode);
+	syncer_ensure_folder(syncer_dir_type, plug_user->syncer_dir_mode);
 
 	const char *mbox_guid;
 	struct syncer_mbox_info * mbox_info;
@@ -119,12 +161,14 @@ static void syncer_report_change(struct syncer_mail_user *plug_user) {
 	while (hash_table_iterate(iter, plug_user->mbox_maps, &mbox_guid, &mbox_info)) {
 
 		const char *record_entry = i_strconcat( //
-				"chng_type=", mbox_info->chng_type, " ", //
-				"mbox_guid=", mbox_guid, " ", //
-				"mbox_name='", mbox_info->mbox_name, "' ", //
+				"chng_type=", mbox_info->chng_type, syncer_record_sep, //
+				"user_name=", mbox_info->user_name, syncer_record_sep, //
+				"mbox_name=", mbox_info->mbox_name, syncer_record_sep, //
+				"mbox_guid=", mbox_info->mbox_guid, syncer_record_sep, //
 				NULL);
 
-		if (plug_user->syncer_use_notice) { // optional plugin messages
+		if (plug_user->syncer_use_notice) {
+			// optional plugin messages
 			i_info("%s : %s", __func__, record_entry);
 		}
 
@@ -137,7 +181,7 @@ static void syncer_report_change(struct syncer_mail_user *plug_user) {
 		if (plug_user->syncer_use_dir) {
 			// report change by mbox
 			const char *record_guid = i_strconcat(syncer_dir_guid, "/", mbox_guid, NULL);
-			int fd_mbox = open(record_guid, O_RDWR | O_CREAT | O_TRUNC, 0600);
+			int fd_mbox = open(record_guid, O_RDWR | O_CREAT | O_TRUNC, plug_user->syncer_file_mode);
 			if (plug_user->syncer_use_content) { // optional report content
 				struct ostream *output = o_stream_create_fd(fd_mbox, 0, FALSE);
 				o_stream_set_no_error_handling(output, TRUE);
@@ -148,7 +192,7 @@ static void syncer_report_change(struct syncer_mail_user *plug_user) {
 			i_close_fd(&fd_mbox);
 			// report change by type
 			const char *record_type = i_strconcat(syncer_dir_type, "/", mbox_info->chng_type, NULL);
-			int fd_type = open(record_type, O_RDWR | O_CREAT | O_TRUNC, 0600);
+			int fd_type = open(record_type, O_RDWR | O_CREAT | O_TRUNC, plug_user->syncer_file_mode);
 			i_close_fd(&fd_type);
 		}
 
@@ -180,26 +224,11 @@ static bool syncer_plugin_getenv_bool(struct mail_user *user, const char * key, 
 	}
 }
 
-static const char * KEY_DIR = "syncer_dir";
-static const char * VAL_DIR = "syncer";
-
-static const char * KEY_USE_DIR = "syncer_use_dir";
-static const char * VAL_USE_DIR = "false";
-
-static const char * KEY_USE_CONTENT = "syncer_use_content";
-static const char * VAL_USE_CONTENT = "false";
-
-static const char * KEY_PIPE = "syncer_pipe";
-static const char * VAL_PIPE = "syncer.pipe";
-
-static const char * KEY_USE_PIPE = "syncer_use_pipe";
-static const char * VAL_USE_PIPE = "false";
-
-static const char * KEY_SCRIPT = "syncer_script";
-static const char * VAL_SCRIPT = "/etc/dovecot/syncer-script.sh";
-
-static const char * KEY_USE_NOTICE = "syncer_use_notice";
-static const char * VAL_USE_NOTICE = "false";
+static int syncer_plugin_getenv_octal(struct mail_user *user, const char * key, const char * value) {
+	const char * text = mail_user_plugin_getenv(user, key);
+	text = text == NULL ? value : text;
+	return (int) strtol(text, NULL, 8);
+}
 
 static void syncer_mail_user_deinit(struct mail_user *user) {
 	struct syncer_mail_user *plug_user = SYNCER_USER_CONTEXT(user);
@@ -236,6 +265,12 @@ static void syncer_mail_user_init(struct mail_user *user) {
 	plug_user->syncer_use_pipe = syncer_plugin_getenv_text(user, KEY_USE_PIPE, VAL_USE_PIPE);
 	plug_user->syncer_script = syncer_plugin_getenv_text(user, KEY_SCRIPT, VAL_SCRIPT);
 	plug_user->syncer_use_notice = syncer_plugin_getenv_bool(user, KEY_USE_NOTICE, VAL_USE_NOTICE);
+	plug_user->syncer_dir_mode = syncer_plugin_getenv_octal(user, KEY_DIR_MODE, VAL_DIR_MODE);
+	plug_user->syncer_file_mode = syncer_plugin_getenv_octal(user, KEY_FILE_MODE, VAL_FILE_MODE);
+
+	i_assert(plug_user->syncer_dir[0] == '/');
+	i_assert(plug_user->syncer_pipe[0] == '/');
+	i_assert(plug_user->syncer_script[0] == '/');
 
 	// collected reports
 	hash_table_create(&plug_user->mbox_maps, plug_user->pool, 0, str_hash, strcmp);
@@ -302,20 +337,17 @@ static void syncer_remember_change(struct mailbox *mbox, const char * chng_type)
 	struct mailbox_metadata mbox_meta;
 	mailbox_get_metadata(mbox, MAILBOX_METADATA_GUID, &mbox_meta);
 
-	const char *guid_text;
-	guid_text = guid_128_to_string(mbox_meta.guid);
+	const char * guid_text = guid_128_to_string(mbox_meta.guid);
 
 	if (hash_table_lookup(plug_user->mbox_maps, guid_text)) {
-		return;
+		return; // already reported
 	} else {
-		const char *mbox_guid;
-		const char *mbox_name;
-		struct syncer_mbox_info *mbox_info;
-		mbox_guid = p_strdup(plug_user->pool, guid_text);
-		mbox_name = p_strdup(plug_user->pool, mbox->name);
-		mbox_info = p_new(plug_user->pool, struct syncer_mbox_info, 1);
-		mbox_info->chng_type = chng_type;
-		mbox_info->mbox_name = mbox_name;
+		const char *mbox_guid = p_strdup(plug_user->pool, guid_text);
+		struct syncer_mbox_info *mbox_info = p_new(plug_user->pool, struct syncer_mbox_info, 1);
+		mbox_info->chng_type = p_strdup(plug_user->pool, chng_type);
+		mbox_info->user_name = p_strdup(plug_user->pool, plug_user->user_name);
+		mbox_info->mbox_name = p_strdup(plug_user->pool, mbox->name);
+		mbox_info->mbox_guid = mbox_guid;
 		hash_table_insert(plug_user->mbox_maps, mbox_guid, mbox_info);
 	}
 

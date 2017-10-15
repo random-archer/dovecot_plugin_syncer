@@ -1,5 +1,5 @@
 
-AC_INIT([syncer-plugin], 10)
+AC_INIT([syncer-plugin], 11)
 
 AC_CONFIG_SRCDIR([src])
 AC_CONFIG_MACRO_DIR([m4])
@@ -31,7 +31,7 @@ AC_SUBST(LIBDOVECOT_INCLUDE)
 AC_CONFIG_FILES([
     Makefile
     src/Makefile
-    tests/Makefile
+    test/Makefile
 ])
 
 AC_OUTPUT

@@ -6,8 +6,11 @@
 				<externalSettings>
 					<externalSetting>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="includePath" name="/dovecot_plugin_runner"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="includePath" name="/dovecot_plugin_syncer"/>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="libraryPath" name="/dovecot_plugin_runner/Debug"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="libraryPath" name="/dovecot_plugin_syncer/Debug"/>
 						<entry flags="RESOLVED" kind="libraryFile" name="dovecot_plugin_runner" srcPrefixMapping="" srcRootPath=""/>
+						<entry flags="RESOLVED" kind="libraryFile" name="dovecot_plugin_syncer" srcPrefixMapping="" srcRootPath=""/>
 					</externalSetting>
 				</externalSettings>
 				<extensions>
@@ -71,8 +74,11 @@
 				<externalSettings>
 					<externalSetting>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="includePath" name="/dovecot_plugin_runner"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="includePath" name="/dovecot_plugin_syncer"/>
 						<entry flags="VALUE_WORKSPACE_PATH" kind="libraryPath" name="/dovecot_plugin_runner/Release"/>
+						<entry flags="VALUE_WORKSPACE_PATH" kind="libraryPath" name="/dovecot_plugin_syncer/Release"/>
 						<entry flags="RESOLVED" kind="libraryFile" name="dovecot_plugin_runner" srcPrefixMapping="" srcRootPath=""/>
+						<entry flags="RESOLVED" kind="libraryFile" name="dovecot_plugin_syncer" srcPrefixMapping="" srcRootPath=""/>
 					</externalSetting>
 				</externalSettings>
 				<extensions>

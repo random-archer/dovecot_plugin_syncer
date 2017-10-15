@@ -9,16 +9,18 @@ set -u -e -E
 piper_service() {
     echo "# piper start"
     [[ -p $pipe ]] || {
-        mkfifo $pipe
-        chmod 0600 $pipe # non-blocking
+        sudo mkdir -p ${pipe%/*}
+        sudo mkfifo $pipe
+        sudo chmod 0644 $pipe # non-blocking
     }
     #
     local line= ; 
     while true ; do # re-connect pipe w/o loss
         exec 3<$pipe
         exec 4<&-
-        while read -r line; do # read report record
-            echo "piper: $line"
+        while read -r event; do # read report record
+            local $event # inject params
+            echo "piper: '$chng_type' '$user_name' '$mbox_name' '$mbox_guid'"
         done <&3
         exec 4<&3
         exec 3<&-
@@ -45,15 +47,17 @@ dovecot_stop() {
 
 initialize() {
     echo "# cleanup"
-    sudo rm -r -f "/etc/dovecot"/*
-    
+    sudo rm -r -f /etc/dovecot*
+    sudo rm -r -f /tmp/dovecot*
+    sudo mkdir -p /tmp/dovecot
+        
     echo "# provision"
-    sudo cp -v -a -r ${0%/*}/etc /
+    sudo cp -v -a -r ${BASH_SOURCE%/*}/etc /
         
     readonly user="arkon@private.dom"
     readonly home="/etc/dovecot/data/private.dom/arkon"
     mkdir -p $home
-    readonly pipe="$home/syncer.pipe"
+    readonly pipe="/tmp/dovecot/syncer-pipe/pipe"
     readonly sieve_script="$home/sieve/active.sieve"
     readonly sieve_filter=(
         'require "fileinto" ;'
@@ -132,4 +136,4 @@ sudo doveadm mailbox delete -u "$user" 'tester'
 sleep "$wait"
 
 echo "# report change"
-sudo ls -Rlas "$home/syncer"*
+sudo ls -Rlas /tmp/dovecot/syncer*

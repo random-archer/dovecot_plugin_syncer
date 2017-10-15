@@ -6,4 +6,4 @@ noinst_HEADERS = \
 
 SUBDIRS = \
     src \
-    tests
+    test
