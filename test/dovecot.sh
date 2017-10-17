@@ -19,7 +19,9 @@ piper_service() {
         exec 3<$pipe
         exec 4<&-
         while read -r event; do # read report record
+            local IFS=$'\t' # record separator
             local $event # inject params
+            unset IFS
             echo "piper: '$chng_type' '$user_name' '$mbox_name' '$mbox_guid'"
         done <&3
         exec 4<&3
