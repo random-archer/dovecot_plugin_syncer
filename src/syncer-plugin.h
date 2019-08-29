@@ -1,7 +1,9 @@
 #ifndef SYNCER_PLUGIN_H
 #define SYNCER_PLUGIN_H
 
+//
 // plugin registration interface
+//
 
 extern const char *syncer_plugin_dependencies[];
 

@@ -2,16 +2,19 @@
 
 #
 # invoke basic tests with dovecot server
+# note: this test changes "/etc" and should be invoked in build container
 #
 
 set -u -e -E
 
+# provide fifo pipe reader
 piper_service() {
     echo "# piper start"
     [[ -p $pipe ]] || {
         sudo mkdir -p ${pipe%/*}
         sudo mkfifo $pipe
-        sudo chmod 0644 $pipe # non-blocking
+        sudo chmod 0644 $pipe # ensure non-blocking
+        sudo chown 1000:1000 $pipe # using auth.conf/uid:gid
     }
     #
     local line= ; 
@@ -68,7 +71,7 @@ initialize() {
     )
     readonly wait="0.1"
     
-    (piper_service) &
+    (piper_service) & # run in background
     
     dovecot_start
 }
@@ -140,4 +143,3 @@ sleep "$wait"
 echo "# report change"
 sudo ls -Rlas $home/syncer*
 sudo ls -Rlas /tmp/dovecot/syncer*
-    

@@ -12,7 +12,7 @@ provision_packages() {
     if pacman -Q dovecot && pacman -Q pigeonhole ; then
         return 0
     fi
-    sudo pacman -S \
+    sudo pacman --sync --noconfirm \
         dovecot \
         pigeonhole \
         base-devel
