@@ -1,5 +1,5 @@
 
-AC_INIT([syncer-plugin], [15]) # name, version
+AC_INIT([syncer-plugin], [16]) # name, version
 
 AC_CONFIG_SRCDIR([src])
 AC_CONFIG_MACRO_DIR([m4])
@@ -14,7 +14,7 @@ AC_CONFIG_HEADERS([config-default.h config-syncer.h])
 # inject custom plugin definitions
 AC_DEFINE_UNQUOTED(SYNCER_NAME, "$PACKAGE_NAME", [syncer package name])
 AC_DEFINE_UNQUOTED(SYNCER_VERSION, "$PACKAGE_VERSION", [syncer package version])
- 
+
 AM_MAINTAINER_MODE
 PKG_PROG_PKG_CONFIG
 
