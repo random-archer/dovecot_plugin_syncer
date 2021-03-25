@@ -1,5 +1,5 @@
 
-AC_INIT([syncer-plugin], [16]) # name, version
+AC_INIT([syncer-plugin], [17]) # name, version
 
 AC_CONFIG_SRCDIR([src])
 AC_CONFIG_MACRO_DIR([m4])
